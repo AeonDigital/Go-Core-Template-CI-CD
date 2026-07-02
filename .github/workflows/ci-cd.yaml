@@ -1,0 +1,176 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  # ------------------------------------------------------------
+  # JOB 1: TEST SUITE & SECURITY ANALYSIS (Runs on Push and PRs)
+  # ------------------------------------------------------------
+  test:
+    name: Run Tests & Security (${{ matrix.os }})
+    if: github.repository != format('{0}/Go-Core-Template-CI-CD', github.repository_owner)
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+
+    steps:
+      # Fix for Windows Runners: Turn off automatic CRLF replacement before checking out code
+      - name: Enforce Canonical LF Line Endings
+        run: git config --global core.autocrlf false
+
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Inject Centralized Automation Scripts
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/Go-Core-Template-CI-CD
+          path: .github-central-scripts
+
+      - name: Provision Scripts to Workspace
+        shell: bash
+        run: bash .github-central-scripts/.github/scripts/ci-cd/00-bootstrap-workspace.sh
+
+      - name: Load Project Environment Metadata
+        shell: bash
+        run: bash .github/scripts/ci-cd/01-load-metadata.sh
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify Go Code Formatting
+        shell: bash
+        run: bash .github/scripts/ci-cd/02-verify-go-formatting.sh
+
+      - name: Run govulncheck
+        if: matrix.os == 'ubuntu-latest'
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+      - name: Run Tests in All Modules
+        shell: pwsh
+        run: .github/scripts/ci-cd/03-run-tests.ps1
+
+      - name: Evaluate Gates & Render Dynamic Badge
+        if: matrix.os == 'ubuntu-latest'
+        uses: vladopajic/go-test-coverage@v2
+        with:
+          profile: .github/coverage.out
+          local-prefix: ${{ env.MODULE_PREFIX }}
+          threshold-total: ${{ env.COVERAGE_THRESHOLD }}
+          git-token: ${{ secrets.GITHUB_TOKEN }}
+          git-branch: badges
+
+  # ------------------------------------------------------------
+  # JOB 2: COMPILATION INTEGRITY CHECK (Pre-verification stage)
+  # ------------------------------------------------------------
+  build-check:
+    name: Verify Code Compilation
+    if: |
+      github.repository != format('{0}/Go-Core-Template-CI-CD', github.repository_owner) &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Inject Centralized Automation Scripts
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/Go-Core-Template-CI-CD
+          path: .github-central-scripts
+
+      - name: Provision Scripts to Workspace
+        shell: bash
+        run: bash .github-central-scripts/.github/scripts/ci-cd/00-bootstrap-workspace.sh
+
+      - name: Load Project Environment Metadata
+        shell: bash
+        run: bash .github/scripts/ci-cd/01-load-metadata.sh
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Pre-Build Verification
+        run: bash .github/scripts/ci-cd/04-pre-build-verify.sh
+
+  # ------------------------------------------------------------
+  # JOB 3: RELEASE & ARTIFACT GENERATION (Executes Safely Last)
+  # ------------------------------------------------------------
+  release:
+    name: Auto Tag, Versioning & Build
+    if: github.repository != format('{0}/Go-Core-Template-CI-CD', github.repository_owner)
+    needs: build-check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          submodules: recursive
+
+      - name: Inject Centralized Automation Scripts
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/Go-Core-Template-CI-CD
+          path: .github-central-scripts
+
+      - name: Provision Scripts to Workspace
+        shell: bash
+        run: bash .github-central-scripts/.github/scripts/ci-cd/00-bootstrap-workspace.sh
+
+      - name: Load Project Environment Metadata
+        shell: bash
+        run: bash .github/scripts/ci-cd/01-load-metadata.sh
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Check for Official Entry Points from Text File
+        id: check_executable
+        run: bash .github/scripts/ci-cd/05-check-entrypoints.sh
+
+      - name: Determine Next Version and Manage Tag
+        id: versioning
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/scripts/ci-cd/06-manage-version-tag.sh
+
+      - name: Run GoReleaser (Publish Cross-Platform Binaries)
+        if: steps.check_executable.outputs.has_main == 'true'
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean -f .github/release/config.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
