@@ -73,7 +73,7 @@ jobs:
           threshold-total: ${{ env.COVERAGE_THRESHOLD }}
           git-token: ${{ secrets.GITHUB_TOKEN }}
           git-branch: badges
-          config: .github/workflows/testcoverage.yaml
+          config: .github/workflows-config/testcoverage.yaml
 
 
   # ------------------------------------------------------------
