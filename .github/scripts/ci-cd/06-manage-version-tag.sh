@@ -16,7 +16,10 @@ echo "==========================================================================
 git fetch --tags --force --quiet
 
 # Captures the latest valid tag from the history or initiates the default baseline.
-LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
+if [ -z "$LATEST_TAG" ]; then
+  LATEST_TAG="v0.0.0"
+fi
 echo "  [ . ] Current repository reference tag identified: $LATEST_TAG"
 
 # Strips the 'v' literal prefix and extracts the numeric array from the SemVer string.
