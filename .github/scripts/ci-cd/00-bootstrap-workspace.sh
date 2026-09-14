@@ -54,6 +54,16 @@ fi
 # Step 4: Cleanup workspace metadata footprints
 rm -rf "$TEMP_SOURCE_DIR"
 
+# Step 5: Mask Injected Paths from Git Tracking (Fix for GoReleaser Dirty State)
+# Writes to the internal hidden Git exclude sheet. This prevents GoReleaser from
+# accusing a "dirty git state" without modifying or dirtying the .gitignore file.
+if [ -d ".git" ]; then
+  mkdir -p .git/info
+  echo "$TARGET_SCRIPTS_DIR/" >> .git/info/exclude
+  echo "$TARGET_RELEASE_DIR/" >> .git/info/exclude
+  echo "  [ v ] Injected pipelines masked securely from local Git tracking tracking hashes."
+fi
+
 echo "================================================================================"
 echo "[OKK] Environment bootstrap sequence completed successfully."
 echo "================================================================================"
