@@ -169,10 +169,10 @@ jobs:
 
       - name: Run GoReleaser (Publish Cross-Platform Binaries)
         if: steps.check_executable.outputs.has_main == 'true'
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: argmax
           args: release --clean -f .github/release/config.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
